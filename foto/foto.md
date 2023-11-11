@@ -1,0 +1,1 @@
+Zdjęcia: Aleksander Lenart
