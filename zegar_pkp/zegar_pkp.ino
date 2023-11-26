@@ -35,11 +35,12 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_BTN), change_time, FALLING);
 
   Rtc.begin();
-  if (Rtc.get_status() & RTC_STATUS_FLAG_OSF) { // When RTC lost the power.
+  if (Rtc.get_status() & (1 << RTC_STATUS_FLAG_OSF)) { // When RTC lost the power.
     Rtc.reset();
+    event = Event::WAIT;
   } else { // When the microcontroller was turned off but RTC was working.
     Rtc.clear_alarm2();
-    // TODO
+    event = Event::SYNC;
   }
 
 #if CLOCK_DEBUG
@@ -93,9 +94,20 @@ void print_byte(byte val) {
 }
 #endif
 
+inline void inc_time(byte* minutes, byte* hours) {
+    *minutes += 1;
+    if (*minutes >= 60) {
+      *minutes = 0;
+      *hours += 1;
+    }
+    if (*hours > 12) {
+      *hours = 1;
+    }
+}
+
 void manage_event() {
   switch(event) {
-    case Event::ALARM:
+    case Event::ALARM: {
       tick();
       delayMicroseconds(100L); // wait some time to move the motor.
       turn_off();
@@ -108,21 +120,14 @@ void manage_event() {
       Rtc.set_alarm1_minutes(minutes);
       Rtc.set_alarm1_hours(hours);
       event = Event::WAIT;
-      break;
-    case Event::CHANGE_TIME:
+    } break;
+    case Event::CHANGE_TIME: {
       event = Event::WAIT;
       while (digitalRead(PIN_BTN) == LOW) {
         tick();
         byte minutes = Rtc.get_minutes();
         byte hours = Rtc.get_hours();
-        minutes += 1;
-        if (minutes >= 60) {
-          minutes = 0;
-          hours += 1;
-        }
-        if (hours > 12) {
-          hours = 1;
-        }
+        inc_time(&minutes, &hours);
         Rtc.set_minutes(minutes);
         Rtc.set_hours(hours);
         Rtc.set_alarm1_minutes(minutes);
@@ -132,10 +137,40 @@ void manage_event() {
         }
       }
       turn_off();
-      break;
-    default:
+      Rtc.clear_alarm2();
+    } break;
+    case Event::SYNC: {
+      byte last_set_minutes = Rtc.get_alarm1_minutes();
+      byte last_set_hours = Rtc.get_alarm1_hours();
+      int last_set_total_minutes = (int)last_set_minutes + ((int)last_set_hours % 12) * 60;
+
+      byte current_minutes = Rtc.get_minutes();
+      byte current_hours = Rtc.get_hours();
+      int current_total_minutes = (int)current_minutes + ((int)current_hours % 12) * 60;
+
+      int lack_minutes;
+      if (last_set_total_minutes <= current_total_minutes) {
+        lack_minutes = current_total_minutes - last_set_total_minutes;
+      } else {
+        lack_minutes = current_total_minutes + 12 * 60 - last_set_total_minutes;
+      }
+
+      for (int i = 0; i < lack_minutes; i++) {
+        tick();
+        inc_time(&last_set_minutes, &last_set_hours);
+        Rtc.set_alarm1_minutes(last_set_minutes);
+        Rtc.set_alarm1_hours(last_set_hours);
+        for(int t = 0; t < 1000L; t++) {
+          delayMicroseconds(TICK);
+        }
+      }
+      turn_off();
+      Rtc.clear_alarm2();
       event = Event::WAIT;
-      break;
+    } break;
+    default: {
+      event = Event::WAIT;
+    } break;
   }
 }
 
@@ -179,16 +214,17 @@ if (event != prev_event || (iii++ == 0 && (iiii++ & 0b111) == 0)) {
   manage_event();
 }
 
-void alarm() {
-  if (event >= Event::ALARM) {
+inline void int_change_event(Event e) {
+  if (event >= e) {
     return;
   }
-  event = Event::ALARM;
+  event = e;
+}
+
+void alarm() {
+  int_change_event(Event::ALARM);
 }
 
 void change_time() {
-  if (event >= Event::CHANGE_TIME) {
-    return;
-  }
-  event = Event::CHANGE_TIME;
+  int_change_event(Event::CHANGE_TIME);
 }
