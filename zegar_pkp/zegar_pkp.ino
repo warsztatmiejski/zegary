@@ -1,13 +1,13 @@
 #include "rtc.h"
+#include "motor.h"
+#include "time.h"
+
 #include <Wire.h>
 #include <LowPower.h>
 
 #define PIN_ALARM 2
-#define PIN_A 4
-#define PIN_B 5
 #define PIN_BTN 3
 #define PIN_BTN_TURN_ON 6
-#define PIN_LED 13
 
 #define TICK 500L
 #define CLOCK_DEBUG 1
@@ -16,22 +16,16 @@ enum class Event {WAIT=0, ALARM=1, CHANGE_TIME=2, SYNC=3};
 static Event global_event = Event::WAIT;
 
 void setup() {
-  pinMode(PIN_A, OUTPUT);
-  pinMode(PIN_B, OUTPUT);
-  pinMode(PIN_LED, OUTPUT);
-
   pinMode(PIN_ALARM, INPUT_PULLUP);
   pinMode(PIN_BTN, INPUT_PULLUP);
   pinMode(PIN_BTN_TURN_ON, INPUT_PULLUP);
 
-  digitalWrite(PIN_A, LOW);
-  digitalWrite(PIN_B, LOW);
-  digitalWrite(PIN_LED, LOW);
-
   attachInterrupt(digitalPinToInterrupt(PIN_ALARM), alarm, FALLING);
   attachInterrupt(digitalPinToInterrupt(PIN_BTN), change_time, FALLING);
 
+  Motor.begin();
   Rtc.begin();
+  
   if (Rtc.get_status() & (1 << RTC_STATUS_FLAG_OSF)) { // When RTC lost the power.
     Rtc.reset();
     global_event = Event::WAIT;
@@ -45,29 +39,6 @@ void setup() {
   while(!Serial);
   Serial.println("INIT");
 #endif
-}
-
-void tick() {
-  static bool polarity = false;
-  if (digitalRead(PIN_BTN_TURN_ON) == LOW) {
-    return;
-  }
-  if (polarity) {
-    digitalWrite(PIN_A, LOW);
-    digitalWrite(PIN_B, HIGH);
-    digitalWrite(PIN_LED, HIGH);
-  } else {
-    digitalWrite(PIN_A, HIGH);
-    digitalWrite(PIN_B, LOW);
-    digitalWrite(PIN_LED, LOW);
-  }
-  polarity = !polarity;
-}
-
-void turn_off() {
-  digitalWrite(PIN_A, LOW);
-  digitalWrite(PIN_B, LOW);
-  digitalWrite(PIN_LED, LOW); 
 }
 
 #if CLOCK_DEBUG
@@ -92,50 +63,55 @@ void print_byte(byte val) {
 }
 #endif
 
-inline void inc_time(byte* minutes, byte* hours) {
-    *minutes += 1;
-    if (*minutes >= 60) {
-      *minutes = 0;
-      *hours += 1;
-    }
-    if (*hours > 12) {
-      *hours = 1;
-    }
-}
-
 inline void delay_tick() {
   for(int t = 0; t < 1000L; t++) {
     delayMicroseconds(TICK);
   }
 }
 
+inline Time get_time_from_rtc() {
+  return {Rtc.get_minutes(), Rtc.get_hours()};
+}
+
+inline Time get_alarm1_from_rtc() {
+  return {Rtc.get_alarm1_minutes(), Rtc.get_alarm1_hours()};
+}
+
+inline void set_time_in_rtc(const Time & t) {
+  Rtc.set_minutes(t.minutes());
+  Rtc.set_hours(t.hours());
+}
+
+inline void set_alarm1_in_rtc(const Time & t) {
+  Rtc.set_alarm1_minutes(t.minutes());
+  Rtc.set_alarm1_hours(t.hours());
+}
+
 inline Event manage_event(Event event) {
   switch(event) {
     case Event::CHANGE_TIME: {
       while (digitalRead(PIN_BTN) == LOW) {
-        tick();
-        byte minutes = Rtc.get_minutes();
-        byte hours = Rtc.get_hours();
-        inc_time(&minutes, &hours);
-        Rtc.set_minutes(minutes);
-        Rtc.set_hours(hours);
-        Rtc.set_alarm1_minutes(minutes);
-        Rtc.set_alarm1_hours(hours);
+        Motor.tick();
+        
+        Time new_time = get_time_from_rtc();
+        new_time.increment_minute();
+        
+        set_time_in_rtc(new_time);
+        set_alarm1_in_rtc(new_time);
+
         delay_tick();
       }
-      turn_off();
+      Motor.turn_off();
       Rtc.clear_alarm2();
       return Event::WAIT;
     } break;
     case Event::ALARM:
     case Event::SYNC: {
-      byte last_set_minutes = Rtc.get_alarm1_minutes();
-      byte last_set_hours = Rtc.get_alarm1_hours();
-      int last_set_total_minutes = (int)last_set_minutes + ((int)last_set_hours % 12) * 60;
+      Time last_set_time = get_alarm1_from_rtc();
+      int last_set_total_minutes = last_set_time.get_total_minutes();
 
-      byte current_minutes = Rtc.get_minutes();
-      byte current_hours = Rtc.get_hours();
-      int current_total_minutes = (int)current_minutes + ((int)current_hours % 12) * 60;
+      Time current_time = get_time_from_rtc();
+      int current_total_minutes = current_time.get_total_minutes();
 
       int lack_minutes;
       if (last_set_total_minutes <= current_total_minutes) {
@@ -145,13 +121,14 @@ inline Event manage_event(Event event) {
       }
 
       for (int i = 0; i < lack_minutes; i++) {
-        tick();
-        inc_time(&last_set_minutes, &last_set_hours);
-        Rtc.set_alarm1_minutes(last_set_minutes);
-        Rtc.set_alarm1_hours(last_set_hours);
+        if (digitalRead(PIN_BTN_TURN_ON) == HIGH) {
+          Motor.tick();
+        }
+        last_set_time.increment_minute();
+        set_alarm1_in_rtc(last_set_time);
         delay_tick();
       }
-      turn_off();
+      Motor.turn_off();
       Rtc.clear_alarm2();
       return Event::WAIT;
     } break;
