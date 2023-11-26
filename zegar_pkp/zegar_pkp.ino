@@ -10,12 +10,13 @@
 #define PIN_LED 13
 
 #define TICK 250L
-#define MINUTE ((60L * 1000L) / TICK)
 #define CLOCK_DEBUG 1
 
-static bool polarity = false;
-static int16_t slow_counter = 0; 
 
+enum class Event {WAIT=0, ALARM=1, CHANGE_TIME=2, SYNC=3};
+
+static bool polarity = false;
+static Event event = Event::WAIT;
 
 void setup() {
   pinMode(PIN_A, OUTPUT);
@@ -34,17 +35,18 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_BTN), change_time, FALLING);
 
   Rtc.begin();
-  Rtc.reset();
+  if (Rtc.get_status() & RTC_STATUS_FLAG_OSF) { // When RTC lost the power.
+    Rtc.reset();
+  } else { // When the microcontroller was turned off but RTC was working.
+    Rtc.clear_alarm2();
+    // TODO
+  }
 
 #if CLOCK_DEBUG
   Serial.begin(19200);
+  while(!Serial);
   Serial.println("INIT");
 #endif
-  
-  //if (rtc_read(0x0F) >> 7) { // When the microcontroller was turned off but RTC has working.
-  //  // TODO restore time
-  //} else {  // When RTC lost the power.
-  //}
 }
 
 void tick() {
@@ -69,12 +71,8 @@ void turn_off() {
   digitalWrite(PIN_LED, LOW); 
 }
 
-void loop() {
 #if CLOCK_DEBUG
-  byte seconds = Rtc.get_seconds();
-  byte minutes = Rtc.get_minutes();
-  byte hours = Rtc.get_hours();
-  Serial.print("time: ");
+void print_time(byte hours, byte minutes, byte seconds) {
   if (hours < 10) Serial.print('0');
   Serial.print(hours);
   Serial.print(':');
@@ -83,36 +81,114 @@ void loop() {
   Serial.print(':');
   if (seconds < 10) Serial.print('0');
   Serial.print(seconds);
+}
+
+void print_byte(byte val) {
+  String a(8);
+  for(byte i = 0; i < 8; i++) {
+    a[7-i] = val & 1 ? '1' : '0';
+    val = val >> 1;
+  }
+  Serial.print(a);
+}
+#endif
+
+void manage_event() {
+  switch(event) {
+    case Event::ALARM:
+      tick();
+      delayMicroseconds(100L); // wait some time to move the motor.
+      turn_off();
+      Rtc.clear_alarm2();
+      // save last viewed time
+      byte seconds = Rtc.get_seconds();
+      byte minutes = Rtc.get_minutes();
+      byte hours = Rtc.get_hours();
+      Rtc.set_alarm1_seconds(seconds);
+      Rtc.set_alarm1_minutes(minutes);
+      Rtc.set_alarm1_hours(hours);
+      event = Event::WAIT;
+      break;
+    case Event::CHANGE_TIME:
+      event = Event::WAIT;
+      while (digitalRead(PIN_BTN) == LOW) {
+        tick();
+        byte minutes = Rtc.get_minutes();
+        byte hours = Rtc.get_hours();
+        minutes += 1;
+        if (minutes >= 60) {
+          minutes = 0;
+          hours += 1;
+        }
+        if (hours > 12) {
+          hours = 1;
+        }
+        Rtc.set_minutes(minutes);
+        Rtc.set_hours(hours);
+        Rtc.set_alarm1_minutes(minutes);
+        Rtc.set_alarm1_hours(hours);
+        for(int t = 0; t < 1000L; t++) {
+          delayMicroseconds(TICK);
+        }
+      }
+      turn_off();
+      break;
+    default:
+      event = Event::WAIT;
+      break;
+  }
+}
+
+void loop() {
+#if CLOCK_DEBUG
+static unsigned int iii = 0;
+static unsigned char iiii = 0;
+static Event prev_event = event;
+if (event != prev_event || (iii++ == 0 && (iiii++ & 0b111) == 0)) {
+  prev_event = event;
+  Serial.print("event: ");
+  switch(event) {
+    case Event::WAIT:
+      Serial.print("WAIT       ");
+      break;
+    case Event::ALARM:
+      Serial.print("ALARM      ");
+      break;
+    case Event::CHANGE_TIME:
+      Serial.print("CHANGE_TIME");
+      break;
+    case Event::SYNC:
+      Serial.print("SYNC       ");
+      break;
+    default:
+      Serial.print("???        ");
+      break;
+  }
+  Serial.print(" time: ");
+  print_time(Rtc.get_hours(), Rtc.get_minutes(), Rtc.get_seconds());
+  Serial.print(" alarm1: ");
+  print_time(Rtc.get_alarm1_hours(), Rtc.get_alarm1_minutes(), Rtc.get_alarm1_seconds());
+  Serial.print(" status: ");
+  print_byte(Rtc.get_status());
   Serial.print('\n');
-  delay(1000L);
+  delayMicroseconds(10000L);
+}
 #else
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 #endif
-  //change_time();
+  manage_event();
 }
 
 void alarm() {
-  #if CLOCK_DEBUG
-  Serial.println("ALARM");
-  #endif
-  tick();
-  //int minutes = rtc_format_to_int(rtc_read(0x01));
-  //int alarm_minutes = (minutes + 1) % 60;
-  //rtc_write(0x07, 0));
-  //rtc_write(0x0B, int_to_rtc_format(alarm_minutes));
-  turn_off();
+  if (event >= Event::ALARM) {
+    return;
+  }
+  event = Event::ALARM;
 }
 
 void change_time() {
-  while (digitalRead(PIN_BTN) == LOW) {
-    tick();
-    //int minutes = rtc_format_to_int(rtc_read(0x01));
-    //int change_minutes = (minutes + 1) % 60;
-    //rtc_write(0x00, 0);
-    //rtc_write(0x01, int_to_rtc_format(change_minutes));
-    for(int tick = 0; tick < 1000L; tick++) {
-      delayMicroseconds(TICK);
-    }
+  if (event >= Event::CHANGE_TIME) {
+    return;
   }
-  turn_off();
+  event = Event::CHANGE_TIME;
 }
