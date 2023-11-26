@@ -8,10 +8,8 @@
 #define RTC_STATUS_FLAG_A1F 0
 
 class _Rtc {
-  public:
-  void begin() {
-    Wire.begin();
-  }
+public:
+  void begin() { Wire.begin(); }
 
   void reset() {
     { // set time to 12:00:00AM (12h mode because of clock face).
@@ -25,46 +23,34 @@ class _Rtc {
       _write(ALARM1_HOURS_ADDR, _hours_encode(12));
     }
     { // set alarm2 to 12:01PM + ALARM every second
-      _write(ALARM2_MINUTES_ADDR, ALARM_FLAG |_minutes_encode(0));
+      _write(ALARM2_MINUTES_ADDR, ALARM_FLAG | _minutes_encode(0));
       _write(ALARM2_HOURS_ADDR, ALARM_FLAG | _hours_encode(12));
-      _write(ALARM2_DAYS_ADDR, ALARM_FLAG | 1);  
+      _write(ALARM2_DAYS_ADDR, ALARM_FLAG | 1);
     }
 
     _write(CONTROL_ADDR, 0b00000110); // Set INT pin + set alarm2.
-    _write(STATUS_ADDR, 0b00000000); // Reset oscillator stop flag.
+    _write(STATUS_ADDR, 0b00000000);  // Reset oscillator stop flag.
   }
 
-  byte get_seconds() {
-    return _seconds_decode(_read(TIME_SECONDS_ADDR));
-  }
-  
-  byte get_minutes() {
-    return _minutes_decode(_read(TIME_MINUTES_ADDR));
-  }
-  
-  byte get_hours() {
-    return _hours_decode(_read(TIME_HOURS_ADDR));
-  }
+  byte get_seconds() { return _seconds_decode(_read(TIME_SECONDS_ADDR)); }
+
+  byte get_minutes() { return _minutes_decode(_read(TIME_MINUTES_ADDR)); }
+
+  byte get_hours() { return _hours_decode(_read(TIME_HOURS_ADDR)); }
 
   byte get_alarm1_seconds() {
     return _seconds_decode(_read(ALARM1_SECONDS_ADDR));
   }
-  
+
   byte get_alarm1_minutes() {
     return _minutes_decode(_read(ALARM1_MINUTES_ADDR));
   }
-  
-  byte get_alarm1_hours() {
-    return _hours_decode(_read(ALARM1_HOURS_ADDR));
-  }
 
-  byte get_status() {
-    return _read(STATUS_ADDR);
-  }
+  byte get_alarm1_hours() { return _hours_decode(_read(ALARM1_HOURS_ADDR)); }
 
-  byte get_control() {
-    return _read(CONTROL_ADDR);
-  }
+  byte get_status() { return _read(STATUS_ADDR); }
+
+  byte get_control() { return _read(CONTROL_ADDR); }
 
   void set_seconds(byte seconds) {
     _write(TIME_SECONDS_ADDR, _seconds_encode(seconds));
@@ -90,15 +76,11 @@ class _Rtc {
     _write(ALARM1_HOURS_ADDR, _seconds_encode(hours));
   }
 
-  void clear_alarm1() {
-    _write(STATUS_ADDR, get_status() & ~0b01);
-  }
+  void clear_alarm1() { _write(STATUS_ADDR, get_status() & ~0b01); }
 
-  void clear_alarm2() {
-    _write(STATUS_ADDR, get_status() & ~0b10);
-  }
-  
-  private:
+  void clear_alarm2() { _write(STATUS_ADDR, get_status() & ~0b10); }
+
+private:
   const byte TIME_SECONDS_ADDR = 0x00;
   const byte TIME_MINUTES_ADDR = 0x01;
   const byte TIME_HOURS_ADDR = 0x02;
@@ -113,7 +95,7 @@ class _Rtc {
   const byte HOUR12_FLAG = 0b01000000;
   const byte ALARM_FLAG = 0b10000000;
   const int RTC_ADDR = 0x68;
-  
+
   byte _read(byte addr) {
     Wire.beginTransmission(RTC_ADDR);
     Wire.write(addr);
@@ -123,7 +105,7 @@ class _Rtc {
       return Wire.read();
     }
   }
-  
+
   void _write(byte addr, byte data) {
     Wire.beginTransmission(RTC_ADDR);
     Wire.write(addr);
@@ -152,7 +134,7 @@ class _Rtc {
   }
 
   byte _hours_encode(byte val) {
-    return HOUR12_FLAG | (val % 10) | (((val / 10) % 2) << 4); 
+    return HOUR12_FLAG | (val % 10) | (((val / 10) % 2) << 4);
   }
-  
+
 } Rtc;

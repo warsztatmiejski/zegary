@@ -5,7 +5,7 @@
 #define PIN_LED 13
 
 class _Motor {
-  public:
+public:
   void begin() {
     _polarity = false;
     pinMode(PIN_A, OUTPUT);
@@ -14,7 +14,7 @@ class _Motor {
     turn_off();
   }
 
-  void turn_off() { 
+  void turn_off() {
     digitalWrite(PIN_A, LOW);
     digitalWrite(PIN_B, LOW);
     digitalWrite(PIN_LED, LOW);
@@ -31,7 +31,8 @@ class _Motor {
       digitalWrite(PIN_LED, LOW);
     }
     _polarity = !_polarity;
-}
-  private:
+  }
+
+private:
   bool _polarity;
 } Motor;
