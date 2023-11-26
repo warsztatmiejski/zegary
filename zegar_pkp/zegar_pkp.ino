@@ -9,14 +9,11 @@
 #define PIN_BTN_TURN_ON 6
 #define PIN_LED 13
 
-#define TICK 250L
+#define TICK 500L
 #define CLOCK_DEBUG 1
 
-
 enum class Event {WAIT=0, ALARM=1, CHANGE_TIME=2, SYNC=3};
-
-static bool polarity = false;
-static Event event = Event::WAIT;
+static Event global_event = Event::WAIT;
 
 void setup() {
   pinMode(PIN_A, OUTPUT);
@@ -37,10 +34,10 @@ void setup() {
   Rtc.begin();
   if (Rtc.get_status() & (1 << RTC_STATUS_FLAG_OSF)) { // When RTC lost the power.
     Rtc.reset();
-    event = Event::WAIT;
+    global_event = Event::WAIT;
   } else { // When the microcontroller was turned off but RTC was working.
     Rtc.clear_alarm2();
-    event = Event::SYNC;
+    global_event = Event::SYNC;
   }
 
 #if CLOCK_DEBUG
@@ -51,6 +48,7 @@ void setup() {
 }
 
 void tick() {
+  static bool polarity = false;
   if (digitalRead(PIN_BTN_TURN_ON) == LOW) {
     return;
   }
@@ -85,7 +83,7 @@ void print_time(byte hours, byte minutes, byte seconds) {
 }
 
 void print_byte(byte val) {
-  String a(8);
+  char a[9] = {0};
   for(byte i = 0; i < 8; i++) {
     a[7-i] = val & 1 ? '1' : '0';
     val = val >> 1;
@@ -105,24 +103,15 @@ inline void inc_time(byte* minutes, byte* hours) {
     }
 }
 
-void manage_event() {
+inline void delay_tick() {
+  for(int t = 0; t < 1000L; t++) {
+    delayMicroseconds(TICK);
+  }
+}
+
+inline Event manage_event(Event event) {
   switch(event) {
-    case Event::ALARM: {
-      tick();
-      delayMicroseconds(100L); // wait some time to move the motor.
-      turn_off();
-      Rtc.clear_alarm2();
-      // save last viewed time
-      byte seconds = Rtc.get_seconds();
-      byte minutes = Rtc.get_minutes();
-      byte hours = Rtc.get_hours();
-      Rtc.set_alarm1_seconds(seconds);
-      Rtc.set_alarm1_minutes(minutes);
-      Rtc.set_alarm1_hours(hours);
-      event = Event::WAIT;
-    } break;
     case Event::CHANGE_TIME: {
-      event = Event::WAIT;
       while (digitalRead(PIN_BTN) == LOW) {
         tick();
         byte minutes = Rtc.get_minutes();
@@ -132,13 +121,13 @@ void manage_event() {
         Rtc.set_hours(hours);
         Rtc.set_alarm1_minutes(minutes);
         Rtc.set_alarm1_hours(hours);
-        for(int t = 0; t < 1000L; t++) {
-          delayMicroseconds(TICK);
-        }
+        delay_tick();
       }
       turn_off();
       Rtc.clear_alarm2();
+      return Event::WAIT;
     } break;
+    case Event::ALARM:
     case Event::SYNC: {
       byte last_set_minutes = Rtc.get_alarm1_minutes();
       byte last_set_hours = Rtc.get_alarm1_hours();
@@ -160,16 +149,14 @@ void manage_event() {
         inc_time(&last_set_minutes, &last_set_hours);
         Rtc.set_alarm1_minutes(last_set_minutes);
         Rtc.set_alarm1_hours(last_set_hours);
-        for(int t = 0; t < 1000L; t++) {
-          delayMicroseconds(TICK);
-        }
+        delay_tick();
       }
       turn_off();
       Rtc.clear_alarm2();
-      event = Event::WAIT;
+      return Event::WAIT;
     } break;
     default: {
-      event = Event::WAIT;
+      return Event::WAIT;
     } break;
   }
 }
@@ -178,11 +165,11 @@ void loop() {
 #if CLOCK_DEBUG
 static unsigned int iii = 0;
 static unsigned char iiii = 0;
-static Event prev_event = event;
-if (event != prev_event || (iii++ == 0 && (iiii++ & 0b111) == 0)) {
-  prev_event = event;
+static Event prev_event = global_event;
+if (global_event != prev_event || (iii++ == 0 && (iiii++ & 0b111) == 0)) {
+  prev_event = global_event;
   Serial.print("event: ");
-  switch(event) {
+  switch(global_event) {
     case Event::WAIT:
       Serial.print("WAIT       ");
       break;
@@ -205,20 +192,22 @@ if (event != prev_event || (iii++ == 0 && (iiii++ & 0b111) == 0)) {
   print_time(Rtc.get_alarm1_hours(), Rtc.get_alarm1_minutes(), Rtc.get_alarm1_seconds());
   Serial.print(" status: ");
   print_byte(Rtc.get_status());
+  Serial.print(" control: ");
+  print_byte(Rtc.get_control());
   Serial.print('\n');
   delayMicroseconds(10000L);
 }
 #else
   LowPower.powerDown(SLEEP_FOREVER, ADC_OFF, BOD_OFF);
 #endif
-  manage_event();
+  global_event = manage_event(global_event);
 }
 
-inline void int_change_event(Event e) {
-  if (event >= e) {
+inline void int_change_event(Event event) {
+  if (global_event >= event) {
     return;
   }
-  event = e;
+  global_event = event;
 }
 
 void alarm() {

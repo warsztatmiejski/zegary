@@ -62,6 +62,10 @@ class _Rtc {
     return _read(STATUS_ADDR);
   }
 
+  byte get_control() {
+    return _read(CONTROL_ADDR);
+  }
+
   void set_seconds(byte seconds) {
     _write(TIME_SECONDS_ADDR, _seconds_encode(seconds));
   }
